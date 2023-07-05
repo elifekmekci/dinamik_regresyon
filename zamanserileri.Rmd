@@ -1,0 +1,258 @@
+---
+title: "DİNAMİK REGRESYON MODELİ İLE ZAMAN SERİLERİ ANALİZİ"
+author: "ELİF EKMEKCİ"
+date: "2023-06-04"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE}
+library(readxl)
+library(lubridate)
+library(fpp2)
+df <- read_excel("/Users/elif/Desktop/zamanserileri_analizi/altindata.xlsx")
+dat <-ts(df[,-1],start=c(2013,1),frequency = 12)
+# date degiskenini cikarip diger 3 degiskeni ts nesnesi olarak tanimladik
+```
+Verimizi incelediğizde aylık bir veri olduğunu görüyoruz.
+
+Değişkenler arasındaki ilişkileri incelemek için saçılım grafiği çizdirelim. 
+
+**NOT:** t ve tkare kullanımına bu adımda karar veriyoruz 
+
+**İlişki her zaman lineer olmak zorunda değildir. Kuadratik olduğu durumlarda değişkenin hem kendisini hem de karesini modele dahil edebiliyoruz**
+```{r message=FALSE, warning=FALSE}
+plot(xau_usd_ounce~xau_try_gram,dat)
+plot(xe~xau_try_gram,dat)
+```
+xau_try_gram ile xe arasındaki ilişki lineer gözüküyor. xau_try_gram  değişkeni burada yanıt değişkeni olarak kullanılacak. Diğer grafiği de incelediğimizde lineer gibi gözüküyor. **Bu nedenle direkt değişkenlerin kendilerini kullanabiliriz karelerini küplerini vs kullanmamıza gerek yok**
+
+Değişkenlerimizin autoplot grafiğini çizdirelim
+```{r message=FALSE, warning=FALSE}
+autoplot(dat)
+```
+
+"xau_try_gram" değişkeni yanıt değişken "xe" ve "xau_usd_ounce" ise bu değişkeni etkileyen değişkenler olacak.
+
+Bunu yapmamız için bizim bir x matrisi oluşturmamız gerekiyor. x matrisi için de xe'yi ve xau_usd_ounce'yi birleştirip bir matris oluşturmamız gerekiyor.
+
+##### İLK ADIMDA YANIT DEĞİŞKENLERİNİ BİRLEŞTİRİP (xreg) TAHMİN DEĞİŞKENİ İÇİN MODEL KURDUK #####
+```{r message=FALSE, warning=FALSE}
+xreg <- cbind(xe = dat[, "xe"],xau_usd_ounce = dat[, "xau_usd_ounce"])
+# Bunu yapmamız icin  bir x matrisi olusturmamız gerekiyor.
+# x matrisi icin de xe'yi ve xau_usd_ounce'yi birlestirip bir matris olusturmamız gerekiyor.
+fit <- auto.arima(dat[, "xau_try_gram"], xreg = xreg) 
+# model tahmini yapiyorum (daha sonra tahmin icin degisken tahmini yapilacak)
+# auto.arima ile xau_try_gram(yanit degiskeni) icin en uygun modeli ariyoruz
+# auto.arima icine olusturdugumuz matrisi yaziyoruz (xreg =xreg) aslinda aciklayici degisken matrisi
+# auto.arima ile fit adinda bir model kurduk 
+# burada auto.arima disinda farklı modeller de kullanılabilir
+summary(fit)
+checkresiduals(fit)
+library(olsrr)
+ols_test_normality(residuals(fit))
+nrow(dat)
+```
+
+**summary(fit)** çalıştırıldığında **ARIMA(3,0,0)** modelini buldu. Mevsimselliği olmayan bir model. MA kısmı da 0 fark almaya gerek görmedi. **R 3 model** kurdu. Yani y'nin 3 gecikmelisiyle model kuruldu
+
+log likelihood = -306.66 olarak hesaplandı. log likelihood değeri ne kadar yüksekse o model bizim için daha iyidir. (en çok olabilirlik metriği)
+
+
+Şimdi 8 aylık tahmin yapalım. Bunun için önce "xau_usd_ounce" ve "xe" serileri için 8 aylık tahmin yapmalıyız.
+
+#### 2.ADIMDA AÇIKLAYICI DEĞİŞKENLER İÇİN AYRI AYRI MODEL KURUP FORECAST YAPIYORUZ ####
+(veriyi test ve train olarak ayırmadık bu yüzden tüm veriyi kullanarak tahmin yapıyoruz yani bu tahmin de train seti tahmini oluyor)
+## forecast yapılacak ancak önce elimizdeki açıklayıcı değişkenlerin tahminini yapıp daha sonra bu tahminlerin tahminini yapıyoruz ##
+
+```{r message=FALSE, warning=FALSE}
+# aciklayici degiskenlerimiz "xau_usd_ounce" ve "xe" icin auto.arima ile tahmin modeli kurduk
+# burada aciklayici degiskenlerin tahmini icin auto.arima kullanildi
+fitusd1 <- auto.arima(dat[, "xau_usd_ounce"])
+fitxe1 <- auto.arima(dat[, "xe"])
+# icine belirtmemiz gerekiyor xe ve xau_usd_ounce (koseli parantez ile)
+
+# 8 adimlik tahmin yapacagiz
+# her ikisi icin 8 adimlik tahmin yapip matrise ekliyoruz
+# yani forecast yapacagiz ama elimizdeki degiskenlerin de once forecastini yapiyoruz
+fusd1 <-forecast(fitusd1,8)
+# bu kodu calistirinca point forecast lo80 gibi degiskenleri veriyor (8 adimlik tahmin)
+fxe1 <-forecast(fitxe1,8)
+summary(fitxe1)
+summary(fitusd1)
+
+```
+
+**ARIMA(0,1,0)**  random walk model yani sadece farka dayalı model 
+dinamik regresyon modelimizin 8 adımlık tahminlerini(forecastlerini) elde edelim 
+
+Elimde var olan açıklayıcı değişkenlerle bir model kurduk. Kurduğumuz model üzerinden forecast yapacağız. Forecast yaparken x'lerin de forecast değerlerini almamız gerekiyor. Bu bulduğumuz forecastleri diğer forecast içerisinde kullanıyoruz. 
+
+Açıklayıcı değişkenlerimizi ne kadar iyi forecast ediyorsak aynı şekilde asıl değişkeni de onlar üzerinden iyi tahmin edeceğiz.
+
+Burada açıklayıcı değişken auto.arima ile tahmin (forecast) edildi ancak ETS model ile ya da  kübik spline ile de tahmin edilebilir. Ayrıca Model için auto.arima kullanabiliriz ancak açıklayıcı değişkenler için auto.arima kullanılacak diye bir şey yok yukarıdaki gibi modelleri kullanabiliriz.
+
+## bu adımda da değişkenlerimizin tahmin değerlerini kullanarak dinamik regresyon modelini tahmin edelim ##
+
+## DİNAMİK REGRESYON MODELİMİZİN 8 ADIMLIK TAHMİNLERİNİ BULALIM ## 
+```{r message=FALSE, warning=FALSE}
+fcast <- forecast(fit,xreg = cbind(xe=as.vector(fxe1$mean),xau_usd_ounce=as.vector(fusd1$mean)))
+# fit auto.arima ile kurdugumuz model
+# xe=as.vector(fxe1$mean)'yi bu sekilde yaziyoruz yani degiskenleri bu sekilde tanimlamamiz gerekiyor
+# boylelikle dinamik regresyon modelimizin 8 adimlik tahminlerini(forecastlerini) elde etmis olduk
+autoplot(fcast) + ylab("xau_try_gram")
+```
+
+
+### TEST VE TRAIN OLARAK AYRILMIŞ VERİ ###
+
+Şimdi aynı veriyi test ve train olarak ayıralım 
+Verimizi ilk olarak bir önceki gibi modelleyelim daha sonra trendi de bir değişken olarak modele dahil edip iki modelin  performanslarını karşılaştıralım.
+
+```{r message=FALSE, warning=FALSE}
+traindat<-window(dat,end=c(2020,6))
+# train set ile dinamik regresyon modeli kuruyoruz
+# daha sonra test seti uzerine tahmin yapiyoruz
+testdat<-window(dat,start=c(2020,7))
+xreg <- cbind(xe = traindat[, "xe"], xau_usd_ounce = traindat[, "xau_usd_ounce"])
+# degiskenleri kod icinde tanimladigimiza dikkat !!*****
+# ayrica train seti kullandigimiza da dikkat !!!!!
+
+########## DINAMIK REGRESYON MODELI KURALIM ##########
+fittrain1 <- auto.arima(traindat[, "xau_try_gram"], xreg = xreg)
+# traindat[, "xau_try_gram"] yanit degiskenini koseli parantez icine yazdik
+# dinamik regresyon modelli kurduk
+
+fittrain1 <- auto.arima(traindat[, "xau_try_gram"], xreg = xreg,
+                        stepwise = FALSE, approximation = FALSE)
+######### auto arima hakkında hatırlatmalar ##############
+# approximation = FALSE yapmamızın sebebi daha cok madel denemesini istememiz
+### HATIRLATMA ###
+# arimamod<-auto.arima(train,lambda="auto",stepwise = FALSE,approximation = FALSE)
+# lambda = "auto" yapinca en uygun lambda degerini buluyor 
+# lambda box-cox icin gerekli auto yazinca en iyisini buluyor
+# arima modelini belirledik
+
+summary(fittrain1)
+checkresiduals(fittrain1)
+```
+
+**loglikelihood değerinin büyük olması iyidir. loglikelihood ne kadar büyükse o veri ile model o kadar uyumludur**
+
+**summary(fittrain1)** çıktısını incelediğimizde ARIMA(2,0,2)(1,0,0) buldu. Fark almaya gerek yok. Mevsimsellik var.
+
+Saçılım grafiğine baktığımızda kuadratik bir yapı var. Bu nedenle buraya t^2 ekledik (aşağıdaki kod)
+ 
+## Trendli model 
+```{r message=FALSE, warning=FALSE}
+t<-ts(1:dim(traindat)[1],start=c(2013,1),frequency = 12) # train setin baslangic tarihini yaziyoruz
+tkare<-t^2
+xreg <- cbind(xe = traindat[, "xe"],xau_usd_ounce = traindat[, "xau_usd_ounce"],t,tkare) 
+# ek olarak t ve tkare eklendi
+
+########## DINAMIK REGRESYON MODELI KURALIM ##########
+# Biz burada dinamik regresyon için t ve t kare kullandık
+fittrain2 <- auto.arima(traindat[, "xau_try_gram"], xreg = xreg, 
+                        stepwise = FALSE, approximation = FALSE) 
+
+summary(fittrain2)
+checkresiduals(fittrain2)
+# ***train seti uzerinden dinamik regresyon modeli kurduk***. 
+# yukarida test ve train diye ayirmadigimiz icin tum veri seti uzerinde model kurmustuk 
+# burada auto.arima yerine baska yontemler denenebilir
+```
+Regression with ARIMA(2,0,3) modeli belirledi.
+
+
+**not** xau vs arasındaki ilişki lineer yerine kuadratik olsaydı orada da bu şekilde t değişkeni kullanacaktık. ancak onlar lineer olduğu için kullanmadık. hem kendisi hem de karesi kuadratik model.
+**buna nereden karar veriyoruz?** Grafiklerden(25.satır). Orjinal değişkenlerle yanıt değişkenim arasındaki ilişkiyi autoplot çizdirip bakıyorum. İlişki eğer lineerse direkt yukarıdaki yaptığımız gibi olduğu gibi kullanıyoruz. Ama kuadratik gözüküyorsa açıklayıcı değişkenin hem kendisini hem de karesini kullanıyoruz.
+
+
+## Test seti için forecast yapmak istiyoruz. Öncelikle x'ler için yapacağız training setteki x'ler için ##
+
+Şimdi her iki yöntemin test seti üzerindeki performansını incelemek için 8 aylık tahmin yapalım. bunun için önce açıklayıcı değişkenleri tahminletip yeni xreg matrisini oluşturmalıyız.
+```{r message=FALSE, warning=FALSE}
+fitusd2 <- auto.arima(traindat[, "xau_usd_ounce"]) 
+fitxe2<- auto.arima(traindat[, "xe"]) 
+
+
+# 1.model icin forecast
+fusd2<-forecast(fitusd2,8) 
+# xau_usd_ounce degiskeni icin auto.arima ile kurdugumuz modelin tahmin degerleri
+fxe2<-forecast(fitxe2,8) 
+# xe degiskeni icin auto.arima ile kurdugumuz modelin tahmin degerleri
+fcasttest1 <- forecast(fittrain1,xreg=cbind(xe=as.vector(fxe2$mean),
+                                            xau_usd_ounce=as.vector(fusd2$mean)))
+# test seti icin 8 adimlik tahminler
+
+### hatirlatma ####
+t<-ts(1:dim(traindat)[1],start=c(2013,1),frequency = 12)
+tkare<-t^2
+xreg <- cbind(xe = traindat[, "xe"],xau_usd_ounce = traindat[, "xau_usd_ounce"],t,tkare) 
+fittrain2 <- auto.arima(traindat[, "xau_try_gram"], xreg = xreg, 
+                        stepwise = FALSE, approximation = FALSE)
+########################
+
+# 2.model icin forecast (fittrain2 modeli)
+t <- ts(dim(traindat)[1]+1:8,start=c(2020,7),frequency = 12) 
+# start olarak train setin baslangicini aliyoruz
+# 8 adimlik tahmin olduğu için 8 yazdik
+# DİKKAT***** start icine test setinin baslangicini yaziyoruz
+## dim(traindat)[1]+1 yerine length(traindat) yazilabilir
+tkare <- t^2
+fcasttest2 <- forecast(fittrain2,xreg =cbind(xe=as.vector(fxe2$mean),
+                                             xau_usd_ounce=as.vector(fusd2$mean),t,tkare))
+# fittrain2 trendli (t ve tkareli model 145.satirda)
+
+autoplot(dat[,"xau_try_gram"]) + ylab("xau_try_gram")+
+  autolayer(fcasttest2,PI=FALSE,series="trendli")+ 
+  autolayer(fcasttest1,PI=FALSE,series = "trendsiz")
+# trendli t ve tkare iceren
+
+accuracy(fcasttest1,testdat[,3])
+accuracy(fcasttest2,testdat[,3])
+# train ve test seti icin degerleri hesaplattik
+# train ve test seti için ME RMSE MAE MPE MAPE gibi degerleri veriyor
+```
+
+İki model kurduk bir modelde xe ve xau_usd_ounce var diğerinde ise bunlara ek t ve t^2 var
+
+
+# EK OLARAK: açıklayıcı değişkene dinamik regresyon uygulama 
+
+Dinamik regresyon modeli kullanarak açıklayıcı değişkenlerin tahminini yapabiliriz
+```{r message=FALSE, warning=FALSE}
+# dinamik regresyon modeli ile yaptik tabii ki burada da auto.arima degisebilir
+fitusd2 <- auto.arima(traindat[, "xau_usd_ounce"])
+fitxe2<- auto.arima(traindat[, "xe"])
+fusd2<-forecast(fitusd2,8)
+fxe2<-forecast(fitxe2,8)
+fcasttest1 <- forecast(fittrain1,xreg = cbind(xe=as.vector(fxe2$mean),
+                                              xau_usd_ounce=as.vector(fusd2$mean)))
+
+
+t<-ts(dim(traindat)[1]+1:8,start=c(2020,7),frequency = 12)
+# DİKKAT***** start icine test setinin baslangicini yaziyoruz
+tkare<-t^2
+fcasttest2 <- forecast(fittrain2,
+xreg = cbind(xe=as.vector(fxe2$mean),
+             xau_usd_ounce=as.vector(fusd2$mean),t,tkare))
+
+accuracy(fcasttest1, testdat[,3])
+accuracy(fcasttest2, testdat[,3])
+```
+Burada da açıklayıcı değişkenleri tahmin etmek için direkt auto.arima kullanmıştık ancak oradaki açıklayıcı değişkenleri tahmin etmek için de dinamik regresyon modeli kullanabiliriz.t ve t^2 yi değişken olarak kullanarak.  
+"xau_usd_ounce" ve t ve tkare ile kullanıldı.
+zamanla xe arasındaki ilişki lineer ancak zamanla xau_usd_ounce arasındaki ilişki kuadratikti. Dolayısıyla xe ile sadece zaman(t) değişkeni xau_usd_ounce içinse t ve tkare beraber kullanıldı.
+
+
+
+
+
+
+
+
+
